@@ -1,0 +1,23 @@
+name: sign_quest_
+description: A simple Flutter demo that reproduces a title screen like 'Sign Quest'.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.18.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  audioplayers: ^6.1.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/images/menu2.png
+    - assets/images/next.png
+    - assets/images/play2.png
+    - assets/music/bgm.mp3
