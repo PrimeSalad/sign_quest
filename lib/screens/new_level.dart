@@ -11,7 +11,7 @@ class NewLevelScreen extends StatefulWidget {
 }
 
 class _NewLevelScreenState extends State<NewLevelScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _rotationAnimation;
@@ -21,14 +21,18 @@ class _NewLevelScreenState extends State<NewLevelScreen>
   bool _showWrongPopup = false;
 
   int _currentLetterIndex = 0;
-  late List<String> _letters; // a-z randomized
+  int _wrongAttempts = 0; // 🧩 now global (does NOT reset per letter)
 
+  late List<String> _letters;
   List<String> _choices = [];
   late String _correctChoice;
+
+  final Map<String, AnimationController> _shakeControllers = {};
 
   @override
   void initState() {
     super.initState();
+
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -49,12 +53,15 @@ class _NewLevelScreenState extends State<NewLevelScreen>
   void _initializeLetters() {
     final random = Random();
     _letters = List.generate(26, (i) => String.fromCharCode(97 + i));
-    _letters.shuffle(random); // 🔀 Randomize order
+    _letters.shuffle(random);
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    for (var c in _shakeControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -73,15 +80,17 @@ class _NewLevelScreenState extends State<NewLevelScreen>
     setState(() {
       _isPaused = false;
       _currentLetterIndex = 0;
+      _wrongAttempts = 0;
       _showCorrectPopup = false;
       _showWrongPopup = false;
     });
     _controller.reset();
     _controller.repeat(reverse: true);
-    _initializeLetters(); // shuffle again
+    _initializeLetters();
     _generateChoices();
   }
 
+  // ✅ No more resetting wrongAttempts here
   void _nextLetter() {
     if (_currentLetterIndex < _letters.length - 1) {
       setState(() => _currentLetterIndex++);
@@ -106,6 +115,26 @@ class _NewLevelScreenState extends State<NewLevelScreen>
     });
   }
 
+  void _handleWrongAnswer(String choice) {
+    setState(() => _wrongAttempts++);
+
+    // ✅ Always safely trigger shake
+    final ctrl = _shakeControllers[choice];
+    if (ctrl != null && mounted) {
+      ctrl.forward(from: 0);
+    }
+
+    // ✅ Stop game after 3 total wrongs
+    if (_wrongAttempts >= 3) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() => _showWrongPopup = true);
+          _controller.stop();
+        }
+      });
+    }
+  }
+
   void _generateChoices() {
     final random = Random();
     final currentLetter = _letters[_currentLetterIndex];
@@ -120,6 +149,17 @@ class _NewLevelScreenState extends State<NewLevelScreen>
       "assets/images/quiz_${wrongChoices[0]}.png",
       "assets/images/quiz_${wrongChoices[1]}.png",
     ]..shuffle(random);
+
+    // ✅ Use persistent shake controllers (don't recreate every time)
+    for (final choice in _choices) {
+      _shakeControllers.putIfAbsent(
+        choice,
+            () => AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 400),
+        ),
+      );
+    }
   }
 
   PageRouteBuilder _createFadeRoute(Widget page) {
@@ -146,18 +186,13 @@ class _NewLevelScreenState extends State<NewLevelScreen>
     return Scaffold(
       body: Stack(
         children: [
-          // 🌄 Background
           Positioned.fill(
-            child: Image.asset(
-              'assets/images/gamebg.jpg',
-              fit: BoxFit.cover,
-            ),
+            child: Image.asset('assets/images/gamebg.jpg', fit: BoxFit.cover),
           ),
 
           SafeArea(
             child: Column(
               children: [
-                // ⚙️ Pause/Menu button
                 Align(
                   alignment: Alignment.topRight,
                   child: Padding(
@@ -174,14 +209,12 @@ class _NewLevelScreenState extends State<NewLevelScreen>
 
                 SizedBox(height: size.height * 0.02),
 
-                // ❓ Question mark
                 Image.asset(
                   "assets/images/question.png",
                   height: size.height * 0.15,
                   fit: BoxFit.contain,
                 ),
 
-                // 🔤 Letter display (main)
                 Expanded(
                   child: Align(
                     alignment: Alignment.center,
@@ -203,7 +236,7 @@ class _NewLevelScreenState extends State<NewLevelScreen>
                               ],
                             ),
                             child: Image.asset(
-                              "assets/images/final_$currentLetter.png", // 🅰 main image
+                              "assets/images/final_$currentLetter.png",
                               height: size.height * 0.36,
                               fit: BoxFit.contain,
                             ),
@@ -214,42 +247,51 @@ class _NewLevelScreenState extends State<NewLevelScreen>
                   ),
                 ),
 
-                // 🧩 Choices (quiz)
+                // 🧩 Choices with shake
                 Padding(
                   padding: EdgeInsets.only(bottom: size.height * 0.035),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: _choices.map((assetPath) {
-                      return GestureDetector(
-                        onTap: _isPaused
-                            ? null
-                            : () {
-                                if (assetPath == _correctChoice) {
-                                  _showCorrect();
-                                } else {
-                                  setState(() => _showWrongPopup = true);
-                                  _controller.stop();
-                                }
-                              },
-                        child: Container(
-                          width: size.width * 0.23,
-                          height: size.height * 0.11,
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.3),
-                            borderRadius: BorderRadius.circular(18),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
-                                blurRadius: 4,
-                                offset: const Offset(2, 2),
-                              ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: Image.asset(
-                              assetPath,
-                              fit: BoxFit.contain,
+                      final shakeCtrl = _shakeControllers[assetPath];
+                      return AnimatedBuilder(
+                        animation: shakeCtrl ?? _controller,
+                        builder: (context, child) {
+                          final offset = (shakeCtrl?.isAnimating ?? false)
+                              ? sin(shakeCtrl!.value * pi * 10) * 10
+                              : 0.0;
+                          return Transform.translate(
+                            offset: Offset(offset, 0),
+                            child: child,
+                          );
+                        },
+                        child: GestureDetector(
+                          onTap: _isPaused
+                              ? null
+                              : () {
+                            if (assetPath == _correctChoice) {
+                              _showCorrect();
+                            } else {
+                              _handleWrongAnswer(assetPath);
+                            }
+                          },
+                          child: Container(
+                            width: size.width * 0.23,
+                            height: size.height * 0.11,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(18),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.2),
+                                  blurRadius: 4,
+                                  offset: const Offset(2, 2),
+                                ),
+                              ],
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(6),
+                              child: Image.asset(assetPath, fit: BoxFit.contain),
                             ),
                           ),
                         ),
@@ -261,121 +303,128 @@ class _NewLevelScreenState extends State<NewLevelScreen>
             ),
           ),
 
-          // ✅ Correct Popup
           if (_showCorrectPopup)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withOpacity(0.3),
-                child: Center(
-                  child: AnimatedOpacity(
-                    opacity: _showCorrectPopup ? 1 : 0,
-                    duration: const Duration(milliseconds: 500),
-                    child: Image.asset(
-                      "assets/images/correct.png",
-                      height: size.height * 0.35,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            _popupOverlay(size, "assets/images/correct.png", 0.35),
 
-          // ❌ Wrong Popup
           if (_showWrongPopup)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withOpacity(0.7),
-                child: Center(
-                  child: Stack(
-                    alignment: Alignment.center,
+            _popupOverlay(size, "assets/images/nt.png", 0.24, showReload: true),
+
+          if (_isPaused) _pauseMenu(size),
+        ],
+      ),
+    );
+  }
+
+  Widget _popupOverlay(Size size, String imagePath, double height,
+      {bool showReload = false}) {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.6),
+        child: Center(
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Image.asset(
+                imagePath,
+                height: size.height * height,
+                fit: BoxFit.contain,
+              ),
+
+              if (showReload)
+                Padding(
+                  padding: EdgeInsets.only(top: size.height * 0.08),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Image.asset(
-                        "assets/images/nt.png",
-                        height: size.height * 0.22,
-                        fit: BoxFit.contain,
+                      // 🔄 Reload Button
+                      GestureDetector(
+                        onTap: () {
+                          _restartGame();
+                          setState(() => _showWrongPopup = false);
+                        },
+                        child: Image.asset(
+                          "assets/images/reload.png",
+                          height: size.height * 0.08,
+                          fit: BoxFit.contain,
+                        ),
                       ),
-                      Padding(
-                        padding: EdgeInsets.only(top: size.height * 0.08),
-                        child: GestureDetector(
-                          onTap: () {
-                            _restartGame();
-                            setState(() => _showWrongPopup = false);
-                          },
-                          child: Image.asset(
-                            "assets/images/reload.png",
-                            height: size.height * 0.10,
-                            fit: BoxFit.contain,
-                          ),
+
+                      SizedBox(width: size.width * 0.04),
+
+                      // 🏠 Menu Button
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const GameScreen(),
+                            ),
+                          );
+                        },
+                        child: Image.asset(
+                          "assets/images/menu2.png",
+                          height: size.height * 0.08,
+                          fit: BoxFit.contain,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
-            ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-          // ⏸ Pause Menu
-          if (_isPaused)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withOpacity(0.6),
-                child: Center(
-                  child: Stack(
-                    alignment: Alignment.center,
+  Widget _pauseMenu(Size size) {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.6),
+        child: Center(
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Image.asset("assets/images/pausecont.png",
+                  height: size.height * 0.25, fit: BoxFit.contain),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(height: size.height * 0.045),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Image.asset(
-                        "assets/images/pausecont.png",
-                        height: size.height * 0.25,
-                        fit: BoxFit.contain,
+                      GestureDetector(
+                        onTap: _togglePause,
+                        child: Image.asset("assets/images/play.png",
+                            height: size.height * 0.085),
                       ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(height: size.height * 0.045),
-                          // Buttons in a single row
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              GestureDetector(
-                                onTap: _togglePause,
-                                child: Image.asset(
-                                  "assets/images/play.png",
-                                  height: size.height * 0.085,
-                                ),
-                              ),
-                              SizedBox(width: size.width * 0.01),
-                              GestureDetector(
-                                onTap: _restartGame,
-                                child: Image.asset(
-                                  "assets/images/reload.png",
-                                  height: size.height * 0.075,
-                                ),
-                              ),
-                              SizedBox(width: size.width * 0.04),
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.pushReplacement(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => const GameScreen(),
-                                    ),
-                                  );
-                                },
-                                child: Image.asset(
-                                  "assets/images/menu2.png",
-                                  height: size.height * 0.075,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                      SizedBox(width: size.width * 0.01),
+                      GestureDetector(
+                        onTap: _restartGame,
+                        child: Image.asset("assets/images/reload.png",
+                            height: size.height * 0.075),
+                      ),
+                      SizedBox(width: size.width * 0.04),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const GameScreen(),
+                            ),
+                          );
+                        },
+                        child: Image.asset("assets/images/menu2.png",
+                            height: size.height * 0.075),
                       ),
                     ],
                   ),
-                ),
+                ],
               ),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }

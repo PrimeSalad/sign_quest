@@ -29,7 +29,7 @@ class VictoryScreen extends StatelessWidget {
               children: [
                 Image.asset(
                   "assets/images/vic.png",
-                  height: size.height * 0.55,
+                  height: size.height * 0.38,
                   fit: BoxFit.contain,
                 ),
                 Column(

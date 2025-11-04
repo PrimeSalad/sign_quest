@@ -30,7 +30,7 @@ class FinalVictoryScreen extends StatelessWidget {
               children: [
                 Image.asset(
                   "assets/images/vic.png",
-                  height: size.height * 0.55,
+                  height: size.height * 0.38,
                   fit: BoxFit.contain,
                 ),
                 Column(
@@ -57,7 +57,6 @@ class FinalVictoryScreen extends StatelessWidget {
                         ),
 
                         SizedBox(width: size.width * 0.08),
-
                         // 🏠 Menu Button (fade transition)
                         GestureDetector(
                           onTap: () {
